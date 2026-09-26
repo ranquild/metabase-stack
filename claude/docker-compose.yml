@@ -1,0 +1,105 @@
+services:
+  appdb:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: metabase
+      POSTGRES_PASSWORD: metabase
+      POSTGRES_DB: metabase
+    volumes:
+      - appdb-data:/var/lib/postgresql/data
+    networks: [appdb]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase -d metabase"]
+      interval: 5s
+      retries: 20
+
+  metabase:
+    image: metabase/metabase-enterprise:latest
+    restart: unless-stopped
+    depends_on:
+      appdb:
+        condition: service_healthy
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: appdb
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_DB_PASS: metabase
+      MB_CONFIG_FILE_PATH: /config/config.yml
+      MB_LOAD_SAMPLE_CONTENT: "true"
+    volumes:
+      - ./metabase/config.yml:/config/config.yml:ro
+    networks: [appdb, metabase, metabase-ui]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health || exit 1"]
+      interval: 5s
+      retries: 60
+      start_period: 60s
+
+  claude:
+    build:
+      context: ./claude
+    restart: unless-stopped
+    init: true
+    tty: true
+    stdin_open: true
+    depends_on:
+      metabase:
+        condition: service_healthy
+      claude-proxy:
+        condition: service_started
+    environment:
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?set CLAUDE_CODE_OAUTH_TOKEN in claude/.env}
+      MB_ADMIN_EMAIL: ${MB_ADMIN_EMAIL:-admin@example.com}
+      MB_ADMIN_PASSWORD: ${MB_ADMIN_PASSWORD:-metasample123}
+      HTTPS_PROXY: http://claude-proxy:8888
+      HTTP_PROXY: http://claude-proxy:8888
+      NO_PROXY: metabase,localhost,127.0.0.1
+    volumes:
+      - workspace:/workspace
+    networks: [metabase, egress, claude-ui]
+
+  claude-proxy:
+    build:
+      context: ./claude-proxy
+    restart: unless-stopped
+    networks: [egress, internet]
+
+  claude-ui:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: TCP-LISTEN:7681,fork,reuseaddr TCP:claude:7681
+    depends_on: [claude]
+    ports:
+      - "127.0.0.1:${TTYD_PORT:-7681}:7681"
+    networks: [claude-ui, claude-ui-published]
+
+  metabase-ui:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: TCP-LISTEN:3000,fork,reuseaddr TCP:metabase:3000
+    depends_on: [metabase]
+    ports:
+      - "127.0.0.1:${MB_JETTY_PORT:-3000}:3000"
+    networks: [metabase-ui, metabase-ui-published]
+
+networks:
+  appdb:
+    internal: true
+  metabase:
+    internal: true
+  egress:
+    internal: true
+  claude-ui:
+    internal: true
+  metabase-ui:
+    internal: true
+  internet: {}
+  claude-ui-published: {}
+  metabase-ui-published: {}
+
+volumes:
+  appdb-data:
+  workspace:

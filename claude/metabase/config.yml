@@ -1,0 +1,6 @@
+# Metabase config file: https://www.metabase.com/docs/latest/configuring-metabase/config-file
+version: 1
+config:
+  settings:
+    check-for-updates: false
+    anon-tracking-enabled: false
