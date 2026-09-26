@@ -13,6 +13,7 @@
    ```
 4. Open http://127.0.0.1:3002 for Metabase (`admin@example.com` /
    `metasample123`), and http://127.0.0.1:4096 for OpenCode.
+5. In OpenCode, create a project for the `/workspace` folder.
 
 Switch models inside OpenCode with `/models`. Stop with `docker compose down`
 (add `-v` to wipe Metabase and the workspace).
