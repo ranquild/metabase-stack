@@ -1,4 +1,4 @@
-# Egress proxy for the claude container: lets it reach api.anthropic.com only.
+# Egress proxy for the open-code container: lets it reach the model providers only.
 FROM alpine:3.22
 RUN apk add --no-cache tinyproxy
 COPY tinyproxy.conf /etc/tinyproxy/tinyproxy.conf

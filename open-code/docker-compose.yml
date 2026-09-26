@@ -1,0 +1,123 @@
+services:
+  metabase-appdb:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: metabase
+      POSTGRES_PASSWORD: metabase
+      POSTGRES_DB: metabase
+    volumes:
+      - metabase-appdb-data:/var/lib/postgresql/data
+    networks: [metabase-appdb]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase -d metabase"]
+      interval: 5s
+      retries: 20
+
+  metabase:
+    image: metabase/metabase-enterprise:latest
+    restart: unless-stopped
+    depends_on:
+      metabase-appdb:
+        condition: service_healthy
+      metabase-proxy:
+        condition: service_started
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: metabase-appdb
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_DB_PASS: metabase
+      MB_CONFIG_FILE_PATH: /config/config.yml
+      MB_LOAD_SAMPLE_CONTENT: "true"
+      MB_PREMIUM_EMBEDDING_TOKEN: ${MB_PREMIUM_EMBEDDING_TOKEN:-}
+      JAVA_OPTS: >-
+        -Dhttp.proxyHost=metabase-proxy -Dhttp.proxyPort=8888
+        -Dhttps.proxyHost=metabase-proxy -Dhttps.proxyPort=8888
+    volumes:
+      - ./metabase/config.yml:/config/config.yml:ro
+    networks: [metabase-appdb, metabase, metabase-ui, metabase-egress]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health || exit 1"]
+      interval: 5s
+      retries: 60
+      start_period: 60s
+
+  open-code:
+    build:
+      context: ./open-code
+    restart: unless-stopped
+    init: true
+    tty: true
+    stdin_open: true
+    depends_on:
+      metabase:
+        condition: service_healthy
+      open-code-proxy:
+        condition: service_started
+    environment:
+      OPENCODE_MODEL: ${OPENCODE_MODEL:?set OPENCODE_MODEL in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      MB_ADMIN_EMAIL: ${MB_ADMIN_EMAIL:-admin@example.com}
+      MB_ADMIN_PASSWORD: ${MB_ADMIN_PASSWORD:-metasample123}
+      HTTPS_PROXY: http://open-code-proxy:8888
+      HTTP_PROXY: http://open-code-proxy:8888
+      NO_PROXY: metabase,localhost,127.0.0.1
+    volumes:
+      - workspace:/workspace
+    networks: [metabase, open-code-egress, open-code-ui]
+
+  open-code-proxy:
+    build:
+      context: ./open-code-proxy
+    restart: unless-stopped
+    networks: [open-code-egress, internet]
+
+  open-code-ui:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: TCP-LISTEN:7681,fork,reuseaddr TCP:open-code:7681
+    depends_on: [open-code]
+    ports:
+      - "127.0.0.1:${TTYD_PORT:-7682}:7681"
+    networks: [open-code-ui, open-code-ui-published]
+
+  metabase-proxy:
+    build:
+      context: ./metabase-proxy
+    restart: unless-stopped
+    networks: [metabase-egress, internet]
+
+  metabase-ui:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    command: TCP-LISTEN:3000,fork,reuseaddr TCP:metabase:3000
+    depends_on: [metabase]
+    ports:
+      - "127.0.0.1:${MB_JETTY_PORT:-3001}:3000"
+    networks: [metabase-ui, metabase-ui-published]
+
+networks:
+  metabase-appdb:
+    internal: true
+  metabase:
+    internal: true
+  open-code-egress:
+    internal: true
+  metabase-egress:
+    internal: true
+  open-code-ui:
+    internal: true
+  metabase-ui:
+    internal: true
+  internet: {}
+  open-code-ui-published: {}
+  metabase-ui-published: {}
+
+volumes:
+  metabase-appdb-data:
+  workspace:
